@@ -123,6 +123,7 @@ reg        md_on;
 wire [1:0] resolution;          // {V30, H40}, V30: verticle 240 vs 224, H40: horizontal 320 vs 256
 wire ce_pix, hblank, vblank, hsync;
 wire       pause_core;
+wire       overlay;           // iosys: menu shown, game paused
 wire [3:0] red   /* xsynthesis syn_keep=1 */, 
            green /* xsynthesis syn_keep=1 */, 
            blue  /* xsynthesis syn_keep=1 */;
@@ -154,7 +155,7 @@ system megadrive (
     .MEM_ADDR(mem_addr), .MEM_DATA(mem_data), .MEM_WDATA(mem_wdata), .MEM_WE(mem_we), .MEM_BE(mem_be),
     .MEM_REQ(mem_req), .MEM_ACK(mem_ack), .ROMSZ(loader_addr[21:1]),
     .EN_HIFI_PCM('0), .LADDER('0), .OBJ_LIMIT_HIGH('0), .TRANSP_DETECT(),
-    .PAUSE_EN(pause_core), .BGA_EN('1), .BGB_EN('1), .SPR_EN('1), .DBG_M68K_A(), .DBG_VBUS_A()
+    .PAUSE_EN(pause_core), .MENU_PAUSE(pause_core & overlay), .BGA_EN('1), .BGB_EN('1), .SPR_EN('1), .DBG_M68K_A(), .DBG_VBUS_A()
 );
 
 
@@ -232,7 +233,6 @@ sdram #(.FREQ(FREQ)) u_sdram (
 
 // iosys for menu, rom loading and other functions -----------------------------------------
 wire iosys_loaded;
-wire overlay;
 wire [7:0] overlay_x;
 wire [7:0] overlay_y;
 wire [14:0] overlay_color;

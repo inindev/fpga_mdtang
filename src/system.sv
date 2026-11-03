@@ -140,6 +140,7 @@ module system
 	
 	//debug
 	input         PAUSE_EN,
+	input         MENU_PAUSE,	// with PAUSE_EN: also hold Z80, PSG and FM (menu shown)
 	input         BGA_EN,
 	input         BGB_EN,
 	input         SPR_EN,
@@ -211,6 +212,7 @@ reg  FM_CLKEN;
 reg clk_z80_cycle;			// 0: CLK_Z80 is high (first half), 1: low (second half)
 always @(posedge MCLK) if (CLK_Z80) clk_z80_cycle <= 1;
 reg pause_reg;				// PAUSE_EN registered on whole m68k cycle
+reg z80_pause = 0;			// MENU_PAUSE registered on whole Z80 cycle
 
 always @(posedge MCLK) begin
 	reg [3:0] FCLKCNT;
@@ -239,20 +241,22 @@ always @(posedge MCLK) begin
 			ZCLKCNT <= 0;
 		if (clk_z80_cycle) 				// make sure Z80_CLKENn is 2 MCLK wide and aligned with CLK_Z80
 			if (ZCLKCNT == 13 | ZCLKCNT == 14) 
-				Z80_CLKENn <= 1; // ~PAUSE_EN;
+				Z80_CLKENn <= ~z80_pause;
 			else
 				Z80_CLKENn <= 0;
 		
 		Z80_CLKENp <= 0;
 		if (ZCLKCNT == 7) begin
-			Z80_CLKENp <= 1; // ~PAUSE_EN;
+			Z80_CLKENp <= ~z80_pause;
 		end
+		if (ZCLKCNT == 14)
+			z80_pause <= MENU_PAUSE;	// changes between Z80 cycles
 
 		PSG_CLKEN <= 0;
 		PCLKCNT <= PCLKCNT + 1'b1;
 		if (PCLKCNT == 14) begin
 			PCLKCNT <= 0;
-			PSG_CLKEN <= 1; 	// ~PAUSE_EN;	// nand2mario: do not pause PSG for frame sync
+			PSG_CLKEN <= ~MENU_PAUSE; 	// nand2mario: do not pause PSG for frame sync
 		end
 
 		M68K_CLKENp <= 0;
@@ -274,7 +278,7 @@ always @(posedge MCLK) begin
 		FCLKCNT <= FCLKCNT + 1'b1;
 		if (FCLKCNT == 6) begin
 			FCLKCNT <= 0;
-			FM_CLKEN <= 1; // ~PAUSE_EN;		// nand2mario: do not pause FM for frame sync
+			FM_CLKEN <= ~MENU_PAUSE;		// nand2mario: do not pause FM for frame sync
 		end
 	end
 end

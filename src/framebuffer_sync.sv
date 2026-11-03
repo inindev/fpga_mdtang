@@ -94,7 +94,7 @@ always @(posedge clk) begin
         if (~pause_core) begin
             if (y == 1 && x == 0)                           // halt on core starting line 1
                 pause_core <= 1'b1;
-        end else if (hdmi_first_line_rr && pause_core) begin     // resume when HDMI start line 0
+        end else if (hdmi_first_line_rr && pause_core && ~overlay) begin     // resume when HDMI start line 0, held while the menu is shown
             pause_core <= 1'b0;
             sync_done <= 1'b1;
         end
