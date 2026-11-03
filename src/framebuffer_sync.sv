@@ -219,6 +219,8 @@ hdmi #( .VIDEO_ID_CODE(VIDEOID),
         .DVI_OUTPUT(0), 
         .VIDEO_REFRESH_RATE(VIDEO_REFRESH),
         .IT_CONTENT(1),
+        .RGB_QUANTIZATION_RANGE(2'b01),    // limited range (16-235), converted in hdmi.sv
+        .CONTENT_TYPE(2'b11),              // Game
         .AUDIO_RATE(AUDIO_RATE), 
         .AUDIO_BIT_WIDTH(AUDIO_BIT_WIDTH),
         .START_X(0),

@@ -1,3 +1,7 @@
+// Modified for tangcore (2026-11-02), from fpga_game_consoles: hsync/vsync registered once
+// more so they line up with DE; channel 0 bit 3 is 0 on the first data island character;
+// RGB_QUANTIZATION_RANGE (with the conversion to 16-235) and CONTENT_TYPE for the AVI
+// InfoFrame. See git history.
 // Implementation of HDMI Spec v1.4a
 // By Sameer Puri https://github.com/sameer
 
@@ -47,6 +51,12 @@ module hdmi
     parameter bit [8*8-1:0] VENDOR_NAME = {"Unknown", 8'd0}, // Must be 8 bytes null-padded 7-bit ASCII
     parameter bit [8*16-1:0] PRODUCT_DESCRIPTION = {"FPGA", 96'd0}, // Must be 16 bytes null-padded 7-bit ASCII
     parameter bit [7:0] SOURCE_DEVICE_INFORMATION = 8'h00, // See README.md or CTA-861-G for the list of valid codes
+
+    // AVI InfoFrame. RGB quantization range: 00 = default for the format, 01 = limited
+    // (16-235; hdmi converts the 0-255 rgb input), 10 = full. Content type:
+    // 00 = none (graphics with IT_CONTENT), 11 = game (minimal processing and latency).
+    parameter bit [1:0] RGB_QUANTIZATION_RANGE = 2'b00,
+    parameter bit [1:0] CONTENT_TYPE = 2'b00,
 
     // Starting screen coordinate when module comes out of reset.
     //
@@ -200,6 +210,32 @@ always_comb begin
         vsync <= invert ^ (cy >= screen_height + vsync_pulse_start && cy < screen_height + vsync_pulse_start + vsync_pulse_size);
 end
 
+// hsync/vsync above are combinational from cx/cy, while mode (and so the start of
+// active video) is two registers after cx: video_data_period, then mode. Registering
+// sync once here gives both the same delay to the encoder, so the distance from sync
+// to active video matches CEA-861 (260 pixels for 720p: 40 sync + 220 back porch).
+logic hsync_r = 1'b0;
+logic vsync_r = 1'b0;
+always_ff @(posedge clk_pixel)
+begin
+    hsync_r <= hsync;
+    vsync_r <= vsync;
+end
+
+// Limited range (RGB_QUANTIZATION_RANGE = 01): the 0-255 pixels from the core are sent as
+// 16-235, so 0 becomes 16 (black) and 255 becomes 235 (white). x * 220 / 256 is within 1 of
+// CTA-861's round(x * 219 / 255) for every x, exact at both ends, and needs only two
+// subtractions: x * 220 = x * 256 - x * 32 - x * 4.
+function automatic [7:0] to_limited(input [7:0] x);
+    logic [15:0] p;
+    p = {x, 8'd0} - {3'd0, x, 5'd0} - {6'd0, x, 2'd0} + 16'd128;
+    return 8'd16 + p[15:8];
+endfunction
+
+logic [23:0] rgb_out;
+assign rgb_out = RGB_QUANTIZATION_RANGE == 2'b01
+    ? {to_limited(rgb[23:16]), to_limited(rgb[15:8]), to_limited(rgb[7:0])} : rgb;
+
 localparam real VIDEO_RATE = (VIDEO_ID_CODE == 1 ? 25.2E6
     : VIDEO_ID_CODE == 2 || VIDEO_ID_CODE == 3 ? 27.027E6
     : VIDEO_ID_CODE == 4 ? 74.25E6
@@ -312,7 +348,9 @@ generate
             .AUDIO_BIT_WIDTH(AUDIO_BIT_WIDTH),
             .VENDOR_NAME(VENDOR_NAME),
             .PRODUCT_DESCRIPTION(PRODUCT_DESCRIPTION),
-            .SOURCE_DEVICE_INFORMATION(SOURCE_DEVICE_INFORMATION)
+            .SOURCE_DEVICE_INFORMATION(SOURCE_DEVICE_INFORMATION),
+            .RGB_QUANTIZATION_RANGE(RGB_QUANTIZATION_RANGE),
+            .CONTENT_TYPE(CONTENT_TYPE)
         ) packet_picker (.clk_pixel(clk_pixel), .clk_audio(clk_audio), .reset(reset), .video_field_end(video_field_end), .packet_enable(packet_enable), .packet_pixel_counter(packet_pixel_counter), .audio_sample_word(audio_sample_word), .header(header), .sub(sub));
         logic [8:0] packet_data;
         packet_assembler packet_assembler (.clk_pixel(clk_pixel), .reset(reset), .data_island_period(data_island_period), .header(header), .sub(sub), .packet_data(packet_data), .counter(packet_pixel_counter));
@@ -330,12 +368,16 @@ generate
             else
             begin
                 mode <= data_island_guard ? 3'd4 : data_island_period ? 3'd3 : video_guard ? 3'd2 : video_data_period ? 3'd1 : 3'd0;
-                video_data <= rgb;
-                control_data <= {{1'b0, data_island_preamble}, {1'b0, video_preamble || data_island_preamble}, {vsync, hsync}}; // ctrl3, ctrl2, ctrl1, ctrl0, vsync, hsync
+                video_data <= rgb_out;
+                control_data <= {{1'b0, data_island_preamble}, {1'b0, video_preamble || data_island_preamble}, {vsync_r, hsync_r}}; // ctrl3, ctrl2, ctrl1, ctrl0, vsync, hsync
                 data_island_data[11:4] <= packet_data[8:1];
-                data_island_data[3] <= cx != 0;
+                // Bit 3 is 0 on the first character after the leading guard band and 1 on
+                // the rest of the island (HDMI 1.4b CTS). The island starts at
+                // cx = screen_width + 14 (data_island_period_instantaneous); this register
+                // samples cx one clock later, in step with mode.
+                data_island_data[3] <= cx != screen_width + 15;
                 data_island_data[2] <= packet_data[0];
-                data_island_data[1:0] <= {vsync, hsync};
+                data_island_data[1:0] <= {vsync_r, hsync_r};
             end
         end
     end
@@ -352,8 +394,8 @@ generate
             else
             begin
                 mode <= video_data_period ? 3'd1 : 3'd0;
-                video_data <= rgb;
-                control_data <= {4'b0000, {vsync, hsync}}; // ctrl3, ctrl2, ctrl1, ctrl0, vsync, hsync
+                video_data <= rgb_out;
+                control_data <= {4'b0000, {vsync_r, hsync_r}}; // ctrl3, ctrl2, ctrl1, ctrl0, vsync, hsync
             end
         end
     end

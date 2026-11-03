@@ -1,3 +1,5 @@
+// Modified for tangcore (2026-11-02), from fpga_game_consoles: HB1/HB2 defined as 0 instead of X,
+// so hardware sends the same bytes as simulation. See git history.
 // Implementation of HDMI audio clock regeneration packet
 // By Sameer Puri https://github.com/sameer
 
@@ -61,11 +63,7 @@ begin
 end
 
 // "An HDMI Sink shall ignore bytes HB1 and HB2 of the Audio Clock Regeneration Packet header."
-`ifdef MODEL_TECH
 assign header = {8'd0, 8'd0, 8'd1};
-`else
-assign header = {8'dX, 8'dX, 8'd1};
-`endif
 
 // "The four Subpackets each contain the same Audio Clock regeneration Subpacket."
 genvar i;

@@ -1,3 +1,6 @@
+// Modified for tangcore (2026-11-02), from fpga_game_consoles: Null packet and packet_type
+// defined as 0 instead of X, so hardware sends the same bytes as simulation;
+// RGB_QUANTIZATION_RANGE and CONTENT_TYPE passed to the AVI InfoFrame. See git history.
 // Implementation of HDMI packet choice logic.
 // By Sameer Puri https://github.com/sameer
 
@@ -10,7 +13,9 @@ module packet_picker
     parameter int AUDIO_RATE = 0,
     parameter bit [8*8-1:0] VENDOR_NAME = 0,
     parameter bit [8*16-1:0] PRODUCT_DESCRIPTION = 0,
-    parameter bit [7:0] SOURCE_DEVICE_INFORMATION = 0
+    parameter bit [7:0] SOURCE_DEVICE_INFORMATION = 0,
+    parameter bit [1:0] RGB_QUANTIZATION_RANGE = 2'b00,
+    parameter bit [1:0] CONTENT_TYPE = 2'b00
 )
 (
     input logic clk_pixel,
@@ -36,15 +41,11 @@ assign sub[3] = subs[packet_type][3];
 
 // NULL packet
 // "An HDMI Sink shall ignore bytes HB1 and HB2 of the Null Packet Header and all bytes of the Null Packet Body."
-`ifdef MODEL_TECH
-assign headers[0] = {8'd0, 8'd0, 8'd0}; assign subs[0] = '{56'd0, 56'd0, 56'd0, 56'd0};
-`else
-assign headers[0] = {8'dX, 8'dX, 8'd0};
-assign subs[0][0] = 56'dX;
-assign subs[0][1] = 56'dX;
-assign subs[0][2] = 56'dX;
-assign subs[0][3] = 56'dX;
-`endif
+assign headers[0] = {8'd0, 8'd0, 8'd0};
+assign subs[0][0] = 56'd0;
+assign subs[0][1] = 56'd0;
+assign subs[0][2] = 56'd0;
+assign subs[0][3] = 56'd0;
 
 // Audio Clock Regeneration Packet
 logic clk_audio_counter_wrap;
@@ -135,9 +136,14 @@ end
 audio_sample_packet #(.SAMPLING_FREQUENCY(SAMPLING_FREQUENCY), .WORD_LENGTH({{WORD_LENGTH[0], WORD_LENGTH[1], WORD_LENGTH[2]}, WORD_LENGTH_LIMIT})) audio_sample_packet (.frame_counter(frame_counter), .valid_bit('{2'b00, 2'b00, 2'b00, 2'b00}), .user_data_bit('{2'b00, 2'b00, 2'b00, 2'b00}), .audio_sample_word(audio_sample_word_packet), .audio_sample_word_present(audio_sample_word_present_packet), .header(headers[2]), .sub(subs[2]));
 
 
+// RGB quantization range and content type come from the hdmi module's parameters. With
+// limited range (01) the pixels must be in 16-235; CTA-861-H 6.4.3 asks the source to
+// signal the range explicitly. Game (11) asks the sink for minimal processing and latency.
 auxiliary_video_information_info_frame #(
     .VIDEO_ID_CODE(7'(VIDEO_ID_CODE)),
-    .IT_CONTENT(IT_CONTENT)
+    .IT_CONTENT(IT_CONTENT),
+    .RGB_QUANTIZATION_RANGE(RGB_QUANTIZATION_RANGE),
+    .CONTENT_TYPE(CONTENT_TYPE)
 ) auxiliary_video_information_info_frame(.header(headers[130]), .sub(subs[130]));
 
 
@@ -162,7 +168,7 @@ begin
         audio_info_frame_sent <= 1'b0;
         auxiliary_video_information_info_frame_sent <= 1'b0;
         source_product_description_info_frame_sent <= 1'b0;
-        packet_type <= 8'dx;
+        packet_type <= 8'd0;  // Null packet
     end
     else if (packet_enable)
     begin
