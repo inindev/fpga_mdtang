@@ -316,8 +316,14 @@ always @(posedge clk_sys) begin
     end
 end
 
+`ifdef VIDEO_FULL_FRAME
+localparam FULL_FRAME = 1;          // the paused game under the menu
+`else
+localparam FULL_FRAME = 0;
+`endif
+
 framebuffer #(
-    .WIDTH(320), .HEIGHT(240), .COLOR_BITS(4)
+    .WIDTH(320), .HEIGHT(240), .COLOR_BITS(4), .FULL_FRAME(FULL_FRAME)
 ) fb (
     .clk(clk_sys), .resetn(~reset), .clk_pixel(hclk), .clk_5x_pixel(hclk5),
     .ce_pix(ce_pix & hsync_seen), .r(red), .g(green), .b(blue), .x(x), .y(y), 

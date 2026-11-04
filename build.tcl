@@ -24,6 +24,7 @@ if {$dev eq "mega60k"} {
     add_file -type verilog "src/plla/pll_12.v"
 } elseif {$dev eq "console138k"} {
     set_device GW5AST-LV138PG484AC1/I0 -device_version B
+    add_file -type verilog "src/boards/full_frame.v"
     add_file -type verilog "src/boards/console.v"
     add_file -type cst "src/boards/console.cst"
     add_file -type verilog "src/pll/pll.v"
@@ -33,12 +34,14 @@ if {$dev eq "mega60k"} {
     add_file -type verilog "src/pll/pll_12.v"
 } elseif {$dev eq "mega138k"} {
     set_device GW5AT-LV138PG484AC1/I0 -device_version B
+    add_file -type verilog "src/boards/full_frame.v"
     add_file -type cst "src/boards/mega.cst"
     add_file -type verilog "src/pll/pll.v"
     add_file -type verilog "src/pll/pll_27.v"
     add_file -type verilog "src/pll/pll_74.v"
 } elseif {$dev eq "mega138kpro"} {
     set_device GW5AST-LV138FPG676AC1/I0 -device_version B
+    add_file -type verilog "src/boards/full_frame.v"
     add_file -type cst "src/boards/mega138kpro.cst"
     add_file -type verilog "src/pll/pll.v"
     add_file -type verilog "src/pll/pll_27.v"

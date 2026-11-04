@@ -18,10 +18,27 @@ module tmds_channel
 
 // See Section 5.4.4.1
 // Below is a direct implementation of Figure 5-7, using the same variable names.
+//
+// One register stage splits it for timing: q_m is computed from video_data and registered
+// (q_m_r), and the DC balancing below works on q_m_r. mode, control_data and
+// data_island_data are delayed by the same clock, so the whole TMDS stream is one pixel
+// clock later on every channel and nothing on screen moves.
 
 logic signed [4:0] acc = 5'sd0;
 
 logic [8:0] q_m;
+logic [8:0] q_m_r = 9'd0;
+logic [2:0] mode_r = 3'd0;
+logic [1:0] control_data_r = 2'd0;
+logic [3:0] data_island_data_r = 4'd0;
+always_ff @(posedge clk_pixel)
+begin
+    q_m_r <= q_m;
+    mode_r <= mode;
+    control_data_r <= control_data;
+    data_island_data_r <= data_island_data;
+end
+
 logic [9:0] q_out;
 logic [9:0] video_coding;
 assign video_coding = q_out;
@@ -32,7 +49,7 @@ logic signed [4:0] N0q_m07;
 always_comb
 begin
     N1D = video_data[0] + video_data[1] + video_data[2] + video_data[3] + video_data[4] + video_data[5] + video_data[6] + video_data[7];
-    case(q_m[0] + q_m[1] + q_m[2] + q_m[3] + q_m[4] + q_m[5] + q_m[6] + q_m[7])
+    case(q_m_r[0] + q_m_r[1] + q_m_r[2] + q_m_r[3] + q_m_r[4] + q_m_r[5] + q_m_r[6] + q_m_r[7])
         4'b0000: N1q_m07 = 5'sd0;
         4'b0001: N1q_m07 = 5'sd1;
         4'b0010: N1q_m07 = 5'sd2;
@@ -69,39 +86,39 @@ begin
     end
     if (acc == 5'sd0 || (N1q_m07 == N0q_m07))
     begin
-        if (q_m[8])
+        if (q_m_r[8])
         begin
             acc_add = N1q_m07 - N0q_m07;
-            q_out = {~q_m[8], q_m[8], q_m[7:0]};
+            q_out = {~q_m_r[8], q_m_r[8], q_m_r[7:0]};
         end
         else
         begin
             acc_add = N0q_m07 - N1q_m07;
-            q_out = {~q_m[8], q_m[8], ~q_m[7:0]};
+            q_out = {~q_m_r[8], q_m_r[8], ~q_m_r[7:0]};
         end
     end
     else
     begin
         if ((acc > 5'sd0 && N1q_m07 > N0q_m07) || (acc < 5'sd0 && N1q_m07 < N0q_m07))
         begin
-            q_out = {1'b1, q_m[8], ~q_m[7:0]};
-            acc_add = (N0q_m07 - N1q_m07) + (q_m[8] ? 5'sd2 : 5'sd0);
+            q_out = {1'b1, q_m_r[8], ~q_m_r[7:0]};
+            acc_add = (N0q_m07 - N1q_m07) + (q_m_r[8] ? 5'sd2 : 5'sd0);
         end
         else
         begin
-            q_out = {1'b0, q_m[8], q_m[7:0]};
-            acc_add = (N1q_m07 - N0q_m07) - (~q_m[8] ? 5'sd2 : 5'sd0);
+            q_out = {1'b0, q_m_r[8], q_m_r[7:0]};
+            acc_add = (N1q_m07 - N0q_m07) - (~q_m_r[8] ? 5'sd2 : 5'sd0);
         end
     end
 end
 
-always_ff @(posedge clk_pixel) acc <= mode != 3'd1 ? 5'sd0 : acc + acc_add;
+always_ff @(posedge clk_pixel) acc <= mode_r != 3'd1 ? 5'sd0 : acc + acc_add;
 
 // See Section 5.4.2
 logic [9:0] control_coding;
 always_comb
 begin
-    unique case(control_data)
+    unique case(control_data_r)
         2'b00: control_coding = 10'b1101010100;
         2'b01: control_coding = 10'b0010101011;
         2'b10: control_coding = 10'b0101010100;
@@ -113,7 +130,7 @@ end
 logic [9:0] terc4_coding;
 always_comb
 begin
-    unique case(data_island_data)
+    unique case(data_island_data_r)
         4'b0000 : terc4_coding = 10'b1010011100;
         4'b0001 : terc4_coding = 10'b1001100011;
         4'b0010 : terc4_coding = 10'b1011100100;
@@ -148,16 +165,16 @@ generate
     if (CN == 1 || CN == 2)
         assign data_guard_band = 10'b0100110011;
     else
-        assign data_guard_band = control_data == 2'b00 ? 10'b1010001110
-            : control_data == 2'b01 ? 10'b1001110001
-            : control_data == 2'b10 ? 10'b0101100011
+        assign data_guard_band = control_data_r == 2'b00 ? 10'b1010001110
+            : control_data_r == 2'b01 ? 10'b1001110001
+            : control_data_r == 2'b10 ? 10'b0101100011
             : 10'b1011000011;
 endgenerate
 
 // Apply selected mode.
 always @(posedge clk_pixel)
 begin
-    case (mode)
+    case (mode_r)
         3'd0: tmds <= control_coding;
         3'd1: tmds <= video_coding;
         3'd2: tmds <= video_guard_band;
