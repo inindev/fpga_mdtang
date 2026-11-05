@@ -20,3 +20,6 @@ set_multicycle_path 3 -end -hold -from [get_clocks {clk_z80}] -to [get_clocks {c
 //set_multicycle_path 4 -start -setup -from [get_pins {megadrive/M68K/excUnit/alu/oper*/*}] -to [get_pins {megadrive/M68K/excUnit/alu/pswCcr*/*}]
 //set_multicycle_path 3 -start -hold -from [get_pins {megadrive/M68K/excUnit/alu/oper*/*}] -to [get_pins {megadrive/M68K/excUnit/alu/pswCcr*/*}]
 
+// Clock crossings: a register named *_meta is the first stage of a synchronizer (iosys's
+// UART input, usb_hid_sync's USB buttons). The path into it crosses clocks on purpose.
+set_false_path -to [get_regs {*_meta*}]

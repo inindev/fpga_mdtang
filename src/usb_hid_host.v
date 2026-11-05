@@ -397,3 +397,19 @@ module usb_hid_host_rom(clk, adr, data);
 	initial $readmemh("usb_hid_host_rom.hex", mem);
 	always @(posedge clk) data <= mem[adr];
 endmodule
+
+// Two-flop synchronizer for the button outputs (game_snes), into the clock of the logic that
+// reads them. Each button is its own bit, so bit by bit is enough: a report that lands on a
+// clock edge shows a changed button one sample early or late. The first stage, usb_meta,
+// matches the *_meta false path in each core's .sdc.
+module usb_hid_sync #(parameter W = 12) (
+    input clk,
+    input [W-1:0] d,                // from the usbclk domain
+    output reg [W-1:0] q
+);
+reg [W-1:0] usb_meta;
+always @(posedge clk) begin
+    usb_meta <= d;
+    q <= usb_meta;
+end
+endmodule

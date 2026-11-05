@@ -43,7 +43,7 @@ module iosys_bl616 #(
     input      [1:0]  fdd_request,      // [1]: write, [0]: read
 
     // Keyboard interface
-    input reg  [7:0] kbd_data,
+    output reg [7:0] kbd_data,
     output reg       kbd_data_valid,
     
     output reg [31:0] core_config,
@@ -75,11 +75,11 @@ reg [7:0] tx_data;
 reg tx_valid;
 wire tx_ready;
 
-// synchronize uart_rx to clk
-reg uart_rx_r = 1, uart_rx_rr = 1;
+// synchronize uart_rx to clk (two flops; the first is *_meta, see the cores' .sdc)
+reg uart_rx_meta = 1, uart_rx_r = 1;
 always @(posedge clk) begin
-    uart_rx_r <= uart_rx;
-    uart_rx_rr <= uart_rx_r;
+    uart_rx_meta <= uart_rx;
+    uart_rx_r <= uart_rx_meta;
 end
 
 // Instantiate UART modules
@@ -88,7 +88,7 @@ async_receiver #(
     .Baud(BAUD_RATE)
 ) uart_receiver (
     .clk(clk),
-    .RxD(uart_rx_rr),
+    .RxD(uart_rx_r),
     .RxD_data(rx_data),
     .RxD_data_ready(rx_valid)
 );
@@ -123,10 +123,8 @@ reg [23:0] rom_remain;
 reg [15:0] data_cnt;
 reg [3:0] kbd_len;
 
-// Add new registers for textdisp interface
-reg [7:0] x_wr;
-reg [7:0] y_wr;
-reg [7:0] char_wr;
+// textdisp command word (see textdisp.v) and its write strobe
+reg [31:0] disp_di;
 reg we;
 
 // Add these registers for cursor management
@@ -170,6 +168,7 @@ reg fdd_read_start, fdd_read_finish, fdd_write_finish;
 // 0x0b addr[15:0] data[15:0] write to disk management interface (mgmt_address and mgmt_writedata)
 // 0x0c <scancode>            send PS/2 scancode (len specified by frame header)
 // 0x0d <string>              debug printf. core ignores this.
+// 0x0f row[7:0] x0[7:0] x1[7:0]  overlay highlight bar on columns x0-x1 of row (row 0xFF: none)
 //
 // Response payloads from FPGA to BL616:
 // 0x01 core_id[7:0]          core ID
@@ -188,9 +187,7 @@ always @(posedge clk) begin
         rom_remain <= 0;
         core_config <= 0;
         data_cnt <= 0;
-        x_wr <= 0;
-        y_wr <= 0;
-        char_wr <= 0;
+        disp_di <= 0;
         we <= 0;
         cursor_x <= 0;
         cursor_y <= 0;
@@ -252,9 +249,7 @@ always @(posedge clk) begin
                         default: ;
                     endcase
                     5: begin                        // print
-                        x_wr <= cursor_x;
-                        y_wr <= cursor_y;
-                        char_wr <= rx_data;
+                        disp_di <= {8'd0, cursor_x, cursor_y, rx_data};
                         if (cursor_x < 32) begin
                             cursor_x <= cursor_x + 1;
                             we <= 1;
@@ -304,6 +299,10 @@ always @(posedge clk) begin
                     'hc: begin                      // send PS/2 scancode to PCXT
                         kbd_data <= rx_data;
                         kbd_data_valid <= 1;
+                    end
+                    'hf: if (data_cnt < 3) begin    // highlight bar: row, first column, last column
+                        disp_di <= {8'd1, 6'd0, data_cnt[1:0], 8'd0, rx_data};
+                        we <= 1;
                     end
                     default: begin
                         // unknown command: consume all data and return
@@ -533,13 +532,10 @@ end
 
 // text display
 `ifndef SIM
-wire [31:0] reg_char_di = {8'b0, x_wr, y_wr, char_wr};
-wire [3:0] reg_char_we = {4{we}};
-
 textdisp #(.COLOR_LOGO(COLOR_LOGO)) disp (
     .clk(clk), .hclk(hclk), .resetn(resetn),
     .x(overlay_x), .y(overlay_y), .color(overlay_color),
-    .reg_char_di(reg_char_di), .reg_char_we(reg_char_we)
+    .reg_char_di(disp_di), .reg_char_we({4{we}})
 );
 `endif
 
