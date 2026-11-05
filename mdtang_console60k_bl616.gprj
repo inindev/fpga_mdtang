@@ -9,6 +9,7 @@
         <File path="src/common/dpram32_block.v" type="file.verilog" enable="1"/>
         <File path="src/common/dpram_block.v" type="file.verilog" enable="1"/>
         <File path="src/framebuffer_sync.sv" type="file.verilog" enable="1"/>
+        <File path="src/audio_cdc.v" type="file.verilog" enable="1"/>
         <File path="src/fx68k/fx68k.sv" type="file.verilog" enable="1"/>
         <File path="src/fx68k/fx68kAlu.sv" type="file.verilog" enable="1"/>
         <File path="src/fx68k/uaddrPla.sv" type="file.verilog" enable="1"/>
