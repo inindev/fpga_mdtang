@@ -1,7 +1,8 @@
 // Modified for tangcore (2026-11-02), from fpga_game_consoles: hsync/vsync registered once
 // more so they line up with DE; channel 0 bit 3 is 0 on the first data island character;
 // RGB_QUANTIZATION_RANGE (with the conversion to 16-235) and CONTENT_TYPE for the AVI
-// InfoFrame. See git history.
+// InfoFrame. 2026-11-05: master volume input (0-10, 3 dB steps) scaling the audio samples.
+// See git history.
 // Implementation of HDMI Spec v1.4a
 // By Sameer Puri https://github.com/sameer
 
@@ -79,7 +80,10 @@ module hdmi
     // synchronous reset back to 0,0
     input logic reset,
     input logic [23:0] rgb,
-    input logic [AUDIO_BIT_WIDTH-1:0] audio_sample_word [1:0],
+    input logic [AUDIO_BIT_WIDTH-1:0] audio_sample_word [1:0],   // signed
+    // Master volume 0-10 (above 10 reads as 10), from any clock: 10 = 0 dB, 3 dB per step,
+    // 0 = mute
+    input logic [3:0] volume,
 
     // These outputs go to your HDMI port
     output logic [2:0] tmds,
@@ -340,6 +344,54 @@ generate
         logic video_field_end;
         assign video_field_end = cx == screen_width - 1'b1 && cy == screen_height - 1'b1;
         logic [4:0] packet_pixel_counter;
+
+        // Master volume. volume comes from the core's clock: two flip-flops (the first
+        // *_meta), then a new value is taken only when two consecutive reads agree, so a
+        // value caught mid-change is never used.
+        logic [3:0] volume_meta = 4'd7, volume_s = 4'd7, volume_s2 = 4'd7, volume_cur = 4'd7;
+        always_ff @(posedge clk_pixel)
+        begin
+            volume_meta <= volume;
+            volume_s <= volume_meta;
+            volume_s2 <= volume_s;
+            if (volume_s == volume_s2)
+                volume_cur <= volume_s;
+        end
+
+        // Gain k / 256, k = round(256 * 10^(dB / 20)), dB = 3 * (volume - 10). At most 1,
+        // so scaling can't overflow.
+        logic [8:0] gain;
+        always_comb
+        begin
+            case (volume_cur)
+                4'd0: gain = 9'd0;
+                4'd1: gain = 9'd11;     // -27 dB
+                4'd2: gain = 9'd16;     // -24 dB
+                4'd3: gain = 9'd23;     // -21 dB
+                4'd4: gain = 9'd32;     // -18 dB
+                4'd5: gain = 9'd46;     // -15 dB
+                4'd6: gain = 9'd64;     // -12 dB
+                4'd7: gain = 9'd91;     //  -9 dB
+                4'd8: gain = 9'd128;    //  -6 dB
+                4'd9: gain = 9'd181;    //  -3 dB
+                default: gain = 9'd256; //   0 dB
+            endcase
+        end
+
+        // One multiplier for both channels, alternating every pixel clock. The samples
+        // change at the audio rate (about 1500 pixel clocks apart), so the two-clock latency
+        // doesn't matter.
+        logic audio_ch = 1'b0, audio_ch_d = 1'b0;
+        logic signed [AUDIO_BIT_WIDTH+9:0] audio_product;
+        logic [AUDIO_BIT_WIDTH-1:0] audio_scaled [1:0];
+        always_ff @(posedge clk_pixel)
+        begin
+            audio_ch <= !audio_ch;
+            audio_ch_d <= audio_ch;
+            audio_product <= $signed(audio_sample_word[audio_ch]) * $signed({1'b0, gain});
+            audio_scaled[audio_ch_d] <= audio_product[AUDIO_BIT_WIDTH+7:8];
+        end
+
         packet_picker #(
             .VIDEO_ID_CODE(VIDEO_ID_CODE),
             .VIDEO_RATE(VIDEO_RATE),
@@ -351,7 +403,7 @@ generate
             .SOURCE_DEVICE_INFORMATION(SOURCE_DEVICE_INFORMATION),
             .RGB_QUANTIZATION_RANGE(RGB_QUANTIZATION_RANGE),
             .CONTENT_TYPE(CONTENT_TYPE)
-        ) packet_picker (.clk_pixel(clk_pixel), .clk_audio(clk_audio), .reset(reset), .video_field_end(video_field_end), .packet_enable(packet_enable), .packet_pixel_counter(packet_pixel_counter), .audio_sample_word(audio_sample_word), .header(header), .sub(sub));
+        ) packet_picker (.clk_pixel(clk_pixel), .clk_audio(clk_audio), .reset(reset), .video_field_end(video_field_end), .packet_enable(packet_enable), .packet_pixel_counter(packet_pixel_counter), .audio_sample_word(audio_scaled), .header(header), .sub(sub));
         logic [8:0] packet_data;
         packet_assembler packet_assembler (.clk_pixel(clk_pixel), .reset(reset), .data_island_period(data_island_period), .header(header), .sub(sub), .packet_data(packet_data), .counter(packet_pixel_counter));
 

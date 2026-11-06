@@ -21,6 +21,7 @@ module iosys_bl616 #(
 
     // OSD display interface
     output overlay,
+    output osd_strip,               // with overlay: only the strip (volume bar), game not paused
     input [7:0] overlay_x,          // 0-255
     input [7:0] overlay_y,          // 0-223
     output [14:0] overlay_color,    // BGR5
@@ -48,6 +49,9 @@ module iosys_bl616 #(
     
     output reg [31:0] core_config,
 
+    // Master volume for the HDMI encoder: 0 (mute) to 10 (0 dB), 3 dB per step
+    output [3:0] volume,
+
     // UART interface
     input  uart_rx,
     output uart_tx
@@ -62,6 +66,10 @@ localparam BAUD_RATE = 2_000_000;
 
 reg overlay_reg = 1;
 assign overlay = overlay_reg;
+reg osd_strip_reg = 0;
+assign osd_strip = osd_strip_reg;
+reg [3:0] volume_reg = 4'd7;        // set by command 0x0e; not cleared by resetn
+assign volume = volume_reg;
 
 reg [7:0] rom_loading_reg = LOADING_STATE;
 assign rom_loading = rom_loading_reg;
@@ -130,6 +138,7 @@ reg we;
 // Add these registers for cursor management
 reg [7:0] cursor_x;
 reg [7:0] cursor_y;
+reg [10:0] font_addr;               // command 0x10: next font byte
 
 reg [7:0] response_type;
 reg response_req;
@@ -162,13 +171,17 @@ reg fdd_read_start, fdd_read_finish, fdd_write_finish;
 // 0x05 <string>              display string from cursor (len implied by frame header, =frame_len-1)
 // 0x06 loading_state[7:0]    set loading state (0: core running, non-0: loading)
 // 0x07 <data>                load data to rom_do (len implied by frame header)
-// 0x08 x[7:0]                x[0]: turn overlay on/off
+// 0x08 x[7:0]                x[0]: turn overlay on/off. x[1]: strip, only columns 8-23 of
+//                            rows 23-24 on a dark band over the running game (volume bar)
 // 0x09 hid1[15:0] hid2[15:0] send USB joystick state to FPGA
 // 0x0a <data_sector>         send a sector (512 bytes) of data to floppy data FIFO
 // 0x0b addr[15:0] data[15:0] write to disk management interface (mgmt_address and mgmt_writedata)
 // 0x0c <scancode>            send PS/2 scancode (len specified by frame header)
 // 0x0d <string>              debug printf. core ignores this.
+// 0x0e volume[7:0]           master volume 0-10 (above 10: 10); 7 from power-up
 // 0x0f row[7:0] x0[7:0] x1[7:0]  overlay highlight bar on columns x0-x1 of row (row 0xFF: none)
+// 0x10 code[7:0] <bytes>     font bytes from character code (8 per character, top row first,
+//                            bit 0 leftmost); only codes 0x80-0x9F are written
 //
 // Response payloads from FPGA to BL616:
 // 0x01 core_id[7:0]          core ID
@@ -265,6 +278,7 @@ always @(posedge clk) begin
                     end
                     8: begin
                         overlay_reg <= rx_data[0];
+                        osd_strip_reg <= rx_data[1];
                     end
                     9: begin
                         case (data_cnt)
@@ -300,9 +314,18 @@ always @(posedge clk) begin
                         kbd_data <= rx_data;
                         kbd_data_valid <= 1;
                     end
+                    'he: if (data_cnt == 0)         // master volume
+                        volume_reg <= rx_data > 8'd10 ? 4'd10 : rx_data[3:0];
                     'hf: if (data_cnt < 3) begin    // highlight bar: row, first column, last column
                         disp_di <= {8'd1, 6'd0, data_cnt[1:0], 8'd0, rx_data};
                         we <= 1;
+                    end
+                    'h10: if (data_cnt == 0)        // font bytes: first code, then the bytes
+                        font_addr <= {rx_data, 3'b0};
+                    else begin                      // textdisp keeps codes 0x80-0x9F only
+                        disp_di <= {8'd2, 5'd0, font_addr, rx_data};
+                        we <= 1;
+                        font_addr <= font_addr + 11'd1;
                     end
                     default: begin
                         // unknown command: consume all data and return

@@ -35,12 +35,14 @@ module framebuffer #(
 
     // overlay from iosys
     input overlay,
+    input osd_strip,                // with overlay: only the strip (volume bar), over the running game
     output [7:0] overlay_x,
     output [7:0] overlay_y,
     input [14:0] overlay_color,     // BGR5
 
     input [15:0] audio_left,        // audio sample
     input [15:0] audio_right,
+    input [3:0] volume,       // master volume 0-10 from iosys (hdmi.sv brings it into the pixel clock)
 
 	// HDMI output signals
 	output       tmds_clk_n,
@@ -113,7 +115,7 @@ always @(posedge clk) begin
         if (~pause_core) begin
             if (y == 1 && x == 0)                           // halt on core starting line 1
                 pause_core <= 1'b1;
-        end else if (hdmi_first_line_rr && pause_core && ~overlay) begin     // resume when HDMI start line 0, held while the menu is shown
+        end else if (hdmi_first_line_rr && pause_core && ~(overlay & ~osd_strip)) begin     // resume when HDMI start line 0, held while the menu is shown (not the strip)
             pause_core <= 1'b0;
             sync_done <= 1'b1;
         end
@@ -222,6 +224,12 @@ localparam LAT = 6;
 localparam [10:0] LINE_EVT = 11'd1290;  // next line's overlay_y is set here, in horizontal blanking
 localparam [10:0] MENU_X0 = 11'd256;    // window left edge
 localparam [9:0]  MENU_Y0 = 10'd24;     // window top edge
+// Strip (osd_strip, the volume bar): text columns 8-23 of rows 23-24, 128x16 pixels (the
+// firmware's OVERLAY_STRIP_*), on a band 2 pixels (6 output pixels) wider on every side
+localparam [10:0] STRIP_X0 = MENU_X0 + 11'd192;     // column 8
+localparam [10:0] STRIP_X1 = MENU_X0 + 11'd576;     // after column 23
+localparam [9:0]  STRIP_Y0 = MENU_Y0 + 10'd552;     // row 23
+localparam [9:0]  STRIP_Y1 = MENU_Y0 + 10'd600;     // after row 24
 
 wire [10:0] hpos = cx + LAT;
 wire [9:0] next_line = cy == 10'd749 ? 10'd0 : cy + 10'd1;
@@ -257,6 +265,21 @@ reg [4:0] menu_win_d;
 always @(posedge clk_pixel)
     menu_win_d <= {menu_win_d[3:0], menu_win0};
 wire menu_win5 = menu_win_d[4];
+wire strip_win0 = hpos >= STRIP_X0 && hpos < STRIP_X1 && cy >= STRIP_Y0 && cy < STRIP_Y1;
+wire band_win0 = hpos >= STRIP_X0 - 11'd6 && hpos < STRIP_X1 + 11'd6 &&
+                 cy >= STRIP_Y0 - 10'd6 && cy < STRIP_Y1 + 10'd6;
+reg [4:0] strip_win_d, band_win_d;
+always @(posedge clk_pixel) begin
+    strip_win_d <= {strip_win_d[3:0], strip_win0};
+    band_win_d <= {band_win_d[3:0], band_win0};
+end
+wire strip_win5 = strip_win_d[4];
+wire band_win5 = band_win_d[4];
+
+// osd_strip from the core clock domain: two flip-flops, the first *_meta
+reg strip_meta, strip_r;
+always @(posedge clk_pixel)
+    {strip_r, strip_meta} <= {strip_meta, osd_strip};
 
 // BGR5 to RGB888, low bits repeated so that 31 becomes 255
 wire [23:0] menu_rgb = {overlay_color[4:0],   overlay_color[4:2],
@@ -265,15 +288,23 @@ wire [23:0] menu_rgb = {overlay_color[4:0],   overlay_color[4:2],
 
 // calc rgb value to hdmi. Under the menu: with FULL_FRAME the paused game dimmed to 1/4
 // behind the menu's black pixels; without it the menu on black (the line buffer holds only
-// 32 lines). Black around the picture.
+// 32 lines). The strip (volume bar): white on a band of the running game dimmed to 1/8
+// with a green tint. Black around the picture.
 always @(posedge clk_pixel) begin
-    if (overlay)
+    if (overlay && ~strip_r)
         rgb <= menu_win5 && (!FULL_FRAME || overlay_color != 15'd0) ? menu_rgb
              : FULL_FRAME && active ?
                {2'b0, ff_rdata[COLOR_BITS*2 +: COLOR_BITS], {(6-COLOR_BITS){1'b0}},
                 2'b0, ff_rdata[COLOR_BITS   +: COLOR_BITS], {(6-COLOR_BITS){1'b0}},
                 2'b0, ff_rdata[0            +: COLOR_BITS], {(6-COLOR_BITS){1'b0}}}     // RGB4 to RGB8 / 4
              : 24'h000000;
+    else if (overlay && band_win5)
+        rgb <= strip_win5 && overlay_color != 15'd0 ? 24'hFFFFFF
+             : active ?
+               {3'b000, mem_portB_rdata[COLOR_BITS*2 +: COLOR_BITS], {(5-COLOR_BITS){1'b0}},
+                3'b010, mem_portB_rdata[COLOR_BITS   +: COLOR_BITS], {(5-COLOR_BITS){1'b0}},
+                3'b000, mem_portB_rdata[0            +: COLOR_BITS], {(5-COLOR_BITS){1'b0}}}    // RGB4 to RGB8 / 8, green + 64
+             : 24'h004000;
     else if (active)
         rgb <= {mem_portB_rdata[COLOR_BITS*2 +: COLOR_BITS], {(8-COLOR_BITS){1'b0}},
                 mem_portB_rdata[COLOR_BITS   +: COLOR_BITS], {(8-COLOR_BITS){1'b0}},
@@ -311,6 +342,7 @@ hdmi( .clk_pixel_x5(clk_5x_pixel),
         .rgb(rgb), 
         .reset( /* ~resetn */ ),
         .audio_sample_word(audio_sample_word),
+        .volume(volume),
         .tmds(tmds), 
         .tmds_clock(tmdsClk), 
         .cx(cx), 
