@@ -181,7 +181,8 @@ reg fdd_read_start, fdd_read_finish, fdd_write_finish;
 // 0x0e volume[7:0]           master volume 0-10 (above 10: 10); 7 from power-up
 // 0x0f row[7:0] x0[7:0] x1[7:0]  overlay highlight bar on columns x0-x1 of row (row 0xFF: none)
 // 0x10 code[7:0] <bytes>     font bytes from character code (8 per character, top row first,
-//                            bit 0 leftmost); only codes 0x80-0x9F are written
+//                            bit 0 leftmost); only codes 0x20-0xFF are written: the menu
+//                            font chosen in Options, and the volume bar in 0x80-0x9F
 //
 // Response payloads from FPGA to BL616:
 // 0x01 core_id[7:0]          core ID
@@ -322,7 +323,7 @@ always @(posedge clk) begin
                     end
                     'h10: if (data_cnt == 0)        // font bytes: first code, then the bytes
                         font_addr <= {rx_data, 3'b0};
-                    else begin                      // textdisp keeps codes 0x80-0x9F only
+                    else begin                      // textdisp keeps codes 0x20-0xFF only
                         disp_di <= {8'd2, 5'd0, font_addr, rx_data};
                         we <= 1;
                         font_addr <= font_addr + 11'd1;

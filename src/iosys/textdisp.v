@@ -16,7 +16,8 @@ module textdisp(
     // [31:24] = 1: highlight bar register. [17:16]: register, [7:0]: value. Registers:
     //              0: row (0xFF: none), 1: first column, 2: last column
     // [31:24] = 2: font byte. [18:8]: address (code * 8 + row), [7:0]: byte. Only codes
-    //              0x80-0x9F ($400-$4FF) are written: the volume bar's bitmap, never the menu font
+    //              0x20-0xFF ($100-$7FF) are written: the menu font chosen in Options, and the
+    //              volume bar's bitmap in 0x80-0x9F. The extra glyphs in 0x00-0x1F stay.
 	input      [3:0]  reg_char_we,
 	input      [31:0] reg_char_di
 );
@@ -46,7 +47,7 @@ localparam [4:0] FOOTER_ROW = 27;
 // $000-$37F: character buffer (32*28)
 // $380-$3FD: logo (14 rows of 9 bytes)
 // $400-$402: highlight bar: row (0xFF: none), first column, last column
-// Font ROM: 256 characters (Latin-1), 8 bytes each, read on hclk; codes 0x80-0x9F are written
+// Font ROM: 256 characters (Latin-1), 8 bytes each, read on hclk; codes 0x20-0xFF are written
 // on clk (port A, command 2).
 // Both are initialized in gowin_dpb_menu.v (written by scripts/font_glyphs.py).
 //
@@ -65,7 +66,7 @@ gowin_dpb_menu menu_mem (
     .clka(clk), .wrea(reg_char_we[0] && (cmd == 8'd0 || cmd == 8'd1)),
     .ada(cmd == 8'd0 ? {1'b0, text_y, text_x} : {9'b100_0000_00, reg_char_di[17:16]}),
     .dina(reg_char_di[7:0]),
-    .wref(reg_char_we[0] && cmd == 8'd2 && reg_char_di[18:16] == 3'b100),
+    .wref(reg_char_we[0] && cmd == 8'd2 && reg_char_di[18:16] != 3'b000),   // codes 0x20-0xFF
     .adfa(reg_char_di[18:8]),
 
     .clkb(hclk), .adb(text_addr), .doutb(text_do),
